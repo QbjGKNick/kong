@@ -393,10 +393,20 @@ do
       return
     end
 
-    local pok, ok, err = pcall(callback, version)
-    if not pok or not ok then
-      log(CRIT, "could not rebuild ", name, " asynchronously:", ok or err)
+    local pok, ok, err
+    ok, err = kong.db:connect()
+    if ok then
+      pok, ok, err = pcall(callback, version)
+      if not pok or not ok then
+        log(CRIT, "could not rebuild ", name, " asynchronously:", ok or err)
+      end
+      kong.db:setkeepalive()
+
+    else
+      kong.db:close()
+      log(CRIT, "could not connect to the database while rebuilding ", name, " asynchronously:", err)
     end
+
     semaphore:post()
   end
 
@@ -436,8 +446,15 @@ do
     end
 
     if timeout > 0 then
+      local ok, err = kong.db:connect()
+      if not ok then
+        kong.db:close()
+        return nil, "failed to connect to the database: " .. tostring(err)
+      end
+
       local pok, ok, err = pcall(callback, version)
       semaphore:post()
+      kong.db:setkeepalive()
       if not pok or not ok then
         return nil, "could not rebuild ", name, " synchronously: " .. tostring(ok or err)
       end
